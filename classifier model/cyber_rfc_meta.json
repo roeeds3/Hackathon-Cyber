@@ -1,0 +1,23 @@
+{
+  "STATUS_MAP": {
+    "IDLE": 0,
+    "CHARGING": 1,
+    "OFF": 2,
+    "SAFE MODE": 3,
+    "ERROR": 4
+  },
+  "FEATURE_ORDER": [
+    "current",
+    "delta_current",
+    "voltage",
+    "delta_voltage",
+    "power (W)",
+    "expected_load",
+    "status",
+    "temperature"
+  ],
+  "DROPPED_FIELDS": [
+    "charger id",
+    "location"
+  ]
+}
