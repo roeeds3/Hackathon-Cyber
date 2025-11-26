@@ -126,11 +126,12 @@ class AttackClusterDetector:
         labels = clusterer.fit_predict(features)
         combined["new_cluster_id"] = labels
 
-        # Find safe nodes that got assigned to attack clusters
+        # Find safe nodes that got assigned to actual attack clusters (not noise)
         attacked_cluster_ids = set(attacked_copy[attacked_copy["cluster_id"] != -1]["cluster_id"].unique())
         at_risk = combined[
             (combined["Is_attacked"] == False) & 
-            (combined["new_cluster_id"].isin(attacked_cluster_ids))
+            (combined["new_cluster_id"].isin(attacked_cluster_ids)) &
+            (combined["new_cluster_id"] != -1)  # Exclude noise clusters
         ]
 
         return at_risk[["ID", "loc_x", "loc_y", "new_cluster_id", "provider"]].rename(
@@ -150,55 +151,79 @@ class AttackClusterDetector:
         """
         plt.figure(figsize=(10, 8))
 
-        # Plot safe nodes in light gray
+        # Plot safe nodes in grey circles
         if not all_nodes.empty:
             safe_nodes = all_nodes[all_nodes["Is_attacked"] == False]
             if not safe_nodes.empty:
                 plt.scatter(
                     safe_nodes["loc_x"],
                     safe_nodes["loc_y"],
-                    c="lightgray",
+                    c="gray",
                     label="Safe",
                     s=100,
-                    alpha=0.6,
+                    alpha=0.7,
                     marker="o",
-                    edgecolor="gray",
-                    linewidth=1
+                    edgecolor="none"
                 )
 
-        # Plot at-risk safe nodes in orange/yellow
+        # Plot at-risk safe nodes in yellow circles
         if not at_risk_nodes.empty:
             plt.scatter(
                 at_risk_nodes["loc_x"],
                 at_risk_nodes["loc_y"],
-                c="orange",
+                c="yellow",
                 label="At Risk",
-                s=120,
-                alpha=0.8,
-                marker="D",
-                edgecolor="darkorange",
-                linewidth=2
+                s=100,
+                alpha=0.7,
+                marker="o",
+                edgecolor="none"
             )
 
-        # Color-map for HDBSCAN clusters
+        # Color-map for HDBSCAN clusters - colored circles
         if not attacked_with_clusters.empty:
             clusters = attacked_with_clusters["cluster_id"].unique()
-            cluster_colors = cm.tab10(np.linspace(0, 1, len(clusters)))
+            # Filter out noise points (cluster_id == -1)
+            actual_clusters = [c for c in clusters if c != -1]
+            cluster_colors = cm.tab10(np.linspace(0, 1, len(actual_clusters)))
 
-            for color, cluster_id in zip(cluster_colors, clusters):
+            for color, cluster_id in zip(cluster_colors, actual_clusters):
                 subset = attacked_with_clusters[
                     attacked_with_clusters["cluster_id"] == cluster_id
                 ]
-                label = f"Cluster {cluster_id}" if cluster_id != -1 else "Noise"
+                label = f"Cluster {cluster_id}"
                 plt.scatter(
                     subset["loc_x"],
                     subset["loc_y"],
                     c=[color],
                     label=label,
                     s=100,
-                    edgecolor="black",
-                    linewidth=1.5,
-                    marker="s"
+                    alpha=0.7,
+                    marker="o",
+                    edgecolor="none"
+                )
+                
+                # Draw circle around each cluster
+                if len(subset) > 0:
+                    center_x = subset["loc_x"].mean()
+                    center_y = subset["loc_y"].mean()
+                    # Calculate radius as max distance from center to any point in cluster
+                    distances = np.sqrt((subset["loc_x"] - center_x)**2 + (subset["loc_y"] - center_y)**2)
+                    radius = distances.max() + 20  # Add padding
+                    circle = plt.Circle((center_x, center_y), radius, color=color, fill=False, linewidth=2, alpha=0.5)
+                    plt.gca().add_patch(circle)
+
+            # Plot noise points separately in orange
+            noise = attacked_with_clusters[attacked_with_clusters["cluster_id"] == -1]
+            if not noise.empty:
+                plt.scatter(
+                    noise["loc_x"],
+                    noise["loc_y"],
+                    c="orange",
+                    label="Noise",
+                    s=100,
+                    alpha=0.7,
+                    marker="o",
+                    edgecolor="none"
                 )
 
         plt.xlabel("X Location")
