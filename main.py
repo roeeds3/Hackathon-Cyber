@@ -18,7 +18,8 @@ async def root():
         "message": "Cyber Attack Classifier API",
         "version": "1.0.0",
         "endpoints": {
-            "classify": "/classify - POST endpoint for classifying charging station data",
+            "classify": "/classify - POST endpoint for classifying a single charging station data",
+            "classify-batch": "/classify-batch - POST endpoint for classifying multiple charging station data in batch",
             "visualize": "/visualize - GET endpoint for getting attack cluster visualization (returns PNG image)"
         }
     }
