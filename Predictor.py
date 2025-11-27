@@ -1,12 +1,15 @@
 import json
 import time
+import io
 from math import sqrt
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 import pandas as pd
 import networkx as nx
 from sklearn.preprocessing import LabelEncoder
 import hdbscan
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for web API
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import numpy as np
@@ -145,9 +148,19 @@ class AttackClusterDetector:
     def visualize(self,
                   all_nodes: pd.DataFrame,
                   attacked_with_clusters: pd.DataFrame,
-                  at_risk_nodes: pd.DataFrame):
+                  at_risk_nodes: pd.DataFrame,
+                  return_image: bool = False) -> Optional[bytes]:
         """
         Creates a visualization of all nodes + clusters + at-risk nodes.
+        
+        Args:
+            all_nodes: DataFrame with all nodes
+            attacked_with_clusters: DataFrame with attacked nodes and cluster IDs
+            at_risk_nodes: DataFrame with at-risk nodes
+            return_image: If True, returns image bytes instead of showing plot
+        
+        Returns:
+            Image bytes if return_image=True, None otherwise
         """
         plt.figure(figsize=(10, 8))
 
@@ -231,7 +244,19 @@ class AttackClusterDetector:
         plt.title("EV Charger Attack Cluster Visualization")
         plt.legend()
         plt.grid(True)
-        plt.show()
+        
+        if return_image:
+            # Save to bytes buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+            buf.seek(0)
+            image_bytes = buf.read()
+            buf.close()
+            plt.close()  # Close figure to free memory
+            return image_bytes
+        else:
+            plt.show()
+            return None
 
     # -------------------------------------------------------------------------
     # Full detection pipeline
@@ -243,6 +268,7 @@ class AttackClusterDetector:
                 "num_attacked": 0,
                 "hdbscan_clusters": [],
                 "connected_components": [],
+                "clustered_df": pd.DataFrame(),  # Return empty DataFrame for consistency
                 "at_risk_nodes": pd.DataFrame()
             }
 
@@ -268,18 +294,21 @@ class StreamingAttackMonitor:
             min_cluster_size=min_cluster_size
         )
 
-    def process_json(self, node_json: dict, visualize=True) -> Dict[str, Any]:
+    def process_json(self, node_json: dict, visualize=True, return_image=False) -> Dict[str, Any]:
         self.store.update_node(node_json)
         all_nodes = self.store.get_all_nodes()
         attacked = self.store.get_attacked_nodes()
         results = self.detector.detect(all_nodes, attacked)
 
         if visualize:
-            self.detector.visualize(
+            image_bytes = self.detector.visualize(
                 all_nodes,
                 results["clustered_df"],
-                results["at_risk_nodes"]
+                results["at_risk_nodes"],
+                return_image=return_image
             )
+            if return_image and image_bytes:
+                results["visualization_image"] = image_bytes
 
         return results
 
