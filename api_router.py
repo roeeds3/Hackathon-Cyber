@@ -3,7 +3,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from classify_one import predict_one
+from classify_one import predict_one, compute_severity
 from Predictor import StreamingAttackMonitor
 
 # Configure logging
@@ -39,6 +39,7 @@ class ClassificationResponse(BaseModel):
     loc_x: float = Field(..., description="X coordinate")
     loc_y: float = Field(..., description="Y coordinate")
     provider: str = Field(..., description="Provider name")
+    severity: Optional[float] = Field(None, description="Severity score (0-100) for attacked nodes, None for safe nodes")
 
 
 class ChargerDataBatchRequest(BaseModel):
@@ -90,13 +91,32 @@ async def classify_charger(data: ChargerDataRequest):
         # Get provider from input or use default
         provider = data.provider if data.provider is not None else "Unknown"
         
+        # Compute severity score for attacked nodes only
+        severity = None
+        if is_attacked:
+            # Build record dict for severity computation
+            record_dict = {
+                "current": data.current,
+                "delta_current": data.delta_current,
+                "voltage": data.voltage,
+                "delta_voltage": data.delta_voltage,
+                "power_w": data.power_w,
+                "expected_load": data.expected_load,
+                "temperature": data.temperature,
+                "status_str": data.status_str
+            }
+            # Get attack probability from prediction
+            p_attack = prediction_result["probabilities"]["CYBER_ATTACK(2)"]
+            severity = compute_severity(record_dict, p_attack=p_attack)
+        
         # Build response dictionary
         result = {
             "ID": str(data.charger_id),
             "Is_attacked": is_attacked,
             "loc_x": float(loc_x),
             "loc_y": float(loc_y),
-            "provider": provider
+            "provider": provider,
+            "severity": severity
         }
         
         # Pass result to Predictor.py for cluster detection and monitoring
@@ -168,13 +188,32 @@ async def classify_chargers_batch(data: ChargerDataBatchRequest):
                 # Get provider from input or use default
                 provider = charger_data.provider if charger_data.provider is not None else "Unknown"
                 
+                # Compute severity score for attacked nodes only
+                severity = None
+                if is_attacked:
+                    # Build record dict for severity computation
+                    record_dict = {
+                        "current": charger_data.current,
+                        "delta_current": charger_data.delta_current,
+                        "voltage": charger_data.voltage,
+                        "delta_voltage": charger_data.delta_voltage,
+                        "power_w": charger_data.power_w,
+                        "expected_load": charger_data.expected_load,
+                        "temperature": charger_data.temperature,
+                        "status_str": charger_data.status_str
+                    }
+                    # Get attack probability from prediction
+                    p_attack = prediction_result["probabilities"]["CYBER_ATTACK(2)"]
+                    severity = compute_severity(record_dict, p_attack=p_attack)
+                
                 # Build response dictionary
                 result = {
                     "ID": str(charger_data.charger_id),
                     "Is_attacked": is_attacked,
                     "loc_x": float(loc_x),
                     "loc_y": float(loc_y),
-                    "provider": provider
+                    "provider": provider,
+                    "severity": severity
                 }
                 
                 # Pass result to Predictor.py for cluster detection and monitoring
@@ -238,6 +277,7 @@ async def get_visualization():
             all_nodes,
             clustered_df,
             at_risk_nodes,
+            node_store=monitor.store,
             return_image=True
         )
         
