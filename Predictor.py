@@ -171,7 +171,7 @@ class AttackClusterDetector:
             plt.scatter(
                 at_risk_nodes["loc_x"],
                 at_risk_nodes["loc_y"],
-                c="yellow",
+                c="orange",
                 label="At Risk",
                 s=100,
                 alpha=0.7,
@@ -190,7 +190,7 @@ class AttackClusterDetector:
                 subset = attacked_with_clusters[
                     attacked_with_clusters["cluster_id"] == cluster_id
                 ]
-                label = f"Cluster {cluster_id}"
+                label = f"Attacked Cluster {cluster_id}"
                 plt.scatter(
                     subset["loc_x"],
                     subset["loc_y"],
@@ -212,14 +212,14 @@ class AttackClusterDetector:
                     circle = plt.Circle((center_x, center_y), radius, color=color, fill=False, linewidth=2, alpha=0.5)
                     plt.gca().add_patch(circle)
 
-            # Plot noise points separately in orange
+            # Plot noise points separately
             noise = attacked_with_clusters[attacked_with_clusters["cluster_id"] == -1]
             if not noise.empty:
                 plt.scatter(
                     noise["loc_x"],
                     noise["loc_y"],
-                    c="orange",
-                    label="Noise",
+                    c="red",
+                    label="Attacked",
                     s=100,
                     alpha=0.7,
                     marker="o",
