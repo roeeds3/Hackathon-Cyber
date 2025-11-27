@@ -29,7 +29,12 @@ class NodeStore:
     def get_all_nodes(self) -> pd.DataFrame:
         if not self.nodes:
             return pd.DataFrame()
-        return pd.DataFrame(self.nodes.values())
+        df = pd.DataFrame(self.nodes.values())
+        # Ensure severity column exists even if all values are None
+        # This prevents issues when some nodes have severity and others don't
+        if "severity" not in df.columns:
+            df["severity"] = None
+        return df
 
     def get_attacked_nodes(self) -> pd.DataFrame:
         df = self.get_all_nodes()
@@ -149,6 +154,7 @@ class AttackClusterDetector:
                   all_nodes: pd.DataFrame,
                   attacked_with_clusters: pd.DataFrame,
                   at_risk_nodes: pd.DataFrame,
+                  node_store: Optional[NodeStore] = None,
                   return_image: bool = False) -> Optional[bytes]:
         """
         Creates a visualization of all nodes + clusters + at-risk nodes.
@@ -192,8 +198,34 @@ class AttackClusterDetector:
                 edgecolor="none"
             )
 
-        # Color-map for HDBSCAN clusters - colored circles
+        # Color-map for HDBSCAN clusters - colored circles with severity-based intensity
         if not attacked_with_clusters.empty:
+            # Debug: Check if severity column exists
+            has_severity_col = "severity" in all_nodes.columns if not all_nodes.empty else False
+            
+            # Create severity lookup dictionary from all_nodes
+            severity_lookup = {}
+            if not all_nodes.empty and has_severity_col:
+                for _, row in all_nodes.iterrows():
+                    node_id = str(row["ID"])
+                    severity_val = row["severity"]
+                    if pd.notna(severity_val):
+                        severity_lookup[node_id] = float(severity_val)
+                    else:
+                        severity_lookup[node_id] = 0.0
+            elif not all_nodes.empty and node_store is not None:
+                # If severity column doesn't exist in DataFrame, get it from the original nodes dict
+                # This handles cases where DataFrame conversion might drop None values
+                for node_id, node_data in node_store.nodes.items():
+                    if "severity" in node_data:
+                        severity_val = node_data["severity"]
+                        if severity_val is not None:
+                            severity_lookup[str(node_id)] = float(severity_val)
+                        else:
+                            severity_lookup[str(node_id)] = 0.0
+                    else:
+                        severity_lookup[str(node_id)] = 0.0
+            
             clusters = attacked_with_clusters["cluster_id"].unique()
             # Filter out noise points (cluster_id == -1)
             actual_clusters = [c for c in clusters if c != -1]
@@ -204,16 +236,70 @@ class AttackClusterDetector:
                     attacked_with_clusters["cluster_id"] == cluster_id
                 ]
                 label = f"Attacked Cluster {cluster_id}"
-                plt.scatter(
-                    subset["loc_x"],
-                    subset["loc_y"],
-                    c=[color],
-                    label=label,
-                    s=100,
-                    alpha=0.7,
-                    marker="o",
-                    edgecolor="none"
-                )
+                
+                # Get severity scores for nodes in this cluster using lookup
+                severities = []
+                for _, row in subset.iterrows():
+                    node_id = str(row["ID"])
+                    severity_val = severity_lookup.get(node_id, 0.0)
+                    severities.append(severity_val)
+                severities = np.array(severities)
+                
+                # Normalize severity to alpha values (0.3 to 1.0 for maximum visibility range)
+                # Higher severity = darker/more opaque (higher alpha)
+                if len(severities) > 0 and severities.max() > 0:
+                    # Scale severity to alpha range [0.3, 1.0] for better contrast
+                    alpha_values = 0.3 + 0.7 * (severities / 100.0)
+                    alpha_values = np.clip(alpha_values, 0.3, 1.0)
+                else:
+                    # Default alpha if no severity data
+                    alpha_values = np.full(len(subset), 0.7)
+                
+                # Convert color to RGB tuple for matplotlib
+                if isinstance(color, np.ndarray):
+                    base_rgb = np.array(color[:3])
+                elif isinstance(color, tuple):
+                    base_rgb = np.array(color[:3])
+                else:
+                    base_rgb = np.array([0.5, 0.5, 0.5])
+                
+                # Plot points individually with per-point alpha and color intensity based on severity
+                for idx, (_, row) in enumerate(subset.iterrows()):
+                    alpha = alpha_values[idx]
+                    severity = severities[idx] if len(severities) > idx else 0.0
+                    
+                    # Darken color based on severity (higher severity = darker color)
+                    # Mix base color with black based on severity
+                    darkness_factor = severity / 100.0  # 0 to 1
+                    darkened_rgb = base_rgb * (1 - 0.5 * darkness_factor)  # Darken up to 50% for more contrast
+                    darkened_rgb = np.clip(darkened_rgb, 0, 1)
+                    
+                    # Create RGBA color tuple with alpha included
+                    rgba_color = (*darkened_rgb, alpha)
+                    
+                    # Only add label for first point in cluster
+                    # Use facecolors parameter to ensure RGBA is applied correctly
+                    plt.scatter(
+                        row["loc_x"],
+                        row["loc_y"],
+                        s=100,
+                        marker="o",
+                        edgecolor="none",
+                        label=label if idx == 0 else "",
+                        facecolors=[rgba_color]
+                    )
+                    
+                    # Add severity score as text label next to the point
+                    plt.annotate(
+                        f'{severity:.1f}',
+                        xy=(row["loc_x"], row["loc_y"]),
+                        xytext=(5, 5),  # Offset text slightly to the right and up
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='black',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7, edgecolor='gray', linewidth=0.5)
+                    )
                 
                 # Draw circle around each cluster
                 if len(subset) > 0:
@@ -225,19 +311,62 @@ class AttackClusterDetector:
                     circle = plt.Circle((center_x, center_y), radius, color=color, fill=False, linewidth=2, alpha=0.5)
                     plt.gca().add_patch(circle)
 
-            # Plot noise points separately
+            # Plot noise points separately with severity-based intensity
             noise = attacked_with_clusters[attacked_with_clusters["cluster_id"] == -1]
             if not noise.empty:
-                plt.scatter(
-                    noise["loc_x"],
-                    noise["loc_y"],
-                    c="red",
-                    label="Attacked",
-                    s=100,
-                    alpha=0.7,
-                    marker="o",
-                    edgecolor="none"
-                )
+                # Get severity scores for noise points using lookup
+                severities = []
+                for _, row in noise.iterrows():
+                    node_id = str(row["ID"])
+                    severity_val = severity_lookup.get(node_id, 0.0)
+                    severities.append(severity_val)
+                severities = np.array(severities)
+                
+                # Normalize severity to alpha values (0.3 to 1.0 for maximum visibility range)
+                if len(severities) > 0 and severities.max() > 0:
+                    # Scale severity to alpha range [0.3, 1.0] for better contrast
+                    alpha_values = 0.3 + 0.7 * (severities / 100.0)
+                    alpha_values = np.clip(alpha_values, 0.3, 1.0)
+                else:
+                    # Default alpha if no severity data
+                    alpha_values = np.full(len(noise), 0.7)
+                
+                # Plot noise points individually with per-point alpha and color intensity based on severity
+                for idx, (_, row) in enumerate(noise.iterrows()):
+                    alpha = alpha_values[idx]
+                    severity = severities[idx] if len(severities) > idx else 0.0
+                    
+                    # Darken red color based on severity (higher severity = darker red)
+                    darkness_factor = severity / 100.0  # 0 to 1
+                    red_intensity = 1.0 - 0.5 * darkness_factor  # Darken red up to 50% for more contrast
+                    red_intensity = max(0.0, min(1.0, red_intensity))
+                    
+                    # Create RGBA color tuple with alpha included
+                    rgba_red = (red_intensity, 0.0, 0.0, alpha)
+                    
+                    # Only add label for first noise point
+                    # Use facecolors parameter to ensure RGBA is applied correctly
+                    plt.scatter(
+                        row["loc_x"],
+                        row["loc_y"],
+                        s=100,
+                        marker="o",
+                        edgecolor="none",
+                        label="Attacked" if idx == 0 else "",
+                        facecolors=[rgba_red]
+                    )
+                    
+                    # Add severity score as text label next to the point
+                    plt.annotate(
+                        f'{severity:.1f}',
+                        xy=(row["loc_x"], row["loc_y"]),
+                        xytext=(5, 5),  # Offset text slightly to the right and up
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='black',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7, edgecolor='gray', linewidth=0.5)
+                    )
 
         plt.xlabel("X Location")
         plt.ylabel("Y Location")
@@ -305,6 +434,7 @@ class StreamingAttackMonitor:
                 all_nodes,
                 results["clustered_df"],
                 results["at_risk_nodes"],
+                node_store=self.store,
                 return_image=return_image
             )
             if return_image and image_bytes:

@@ -15,6 +15,72 @@ FEATURE_ORDER = meta["FEATURE_ORDER"]
 LABEL_MAP = {0: "OK", 1: "ERROR", 2: "CYBER_ATTACK"}
 
 
+def compute_severity(record, p_attack=None):
+    """
+    Compute severity score for a charging station record.
+    
+    Args:
+        record: dict with sensor fields (current, delta_current, voltage, delta_voltage,
+                power_w, expected_load, temperature, status_str)
+        p_attack: Optional attack probability from ML model (0-1)
+    
+    Returns:
+        float: Severity score (0-100)
+    """
+    # record is dict with your JSON fields
+    I = record["current"]
+    dI = record["delta_current"]
+    V = record["voltage"]
+    dV = record["delta_voltage"]
+    P = record["power_w"]
+    L = record["expected_load"]
+    T = record["temperature"]
+    status = record["status_str"]
+
+    # 1) power mismatch
+    P_calc = I * V
+    m_p = abs(P - P_calc) / max(P, 1)
+    s_p = np.clip(m_p / 0.5, 0, 1)
+
+    # 2) load mismatch
+    m_l = abs(L - P) / max(L, 1)
+    s_l = np.clip(m_l / 0.6, 0, 1)
+
+    # 3) delta spikes
+    s_c = np.clip(abs(dI) / 60, 0, 1)
+    s_v = np.clip(abs(dV) / 150, 0, 1)
+
+    # 4) temperature danger
+    if T < 60:
+        s_t = 0
+    elif T <= 90:
+        s_t = (T - 60) / 30
+    else:
+        s_t = 1
+
+    # 5) status contradiction
+    contradiction = False
+    if status == "CHARGING" and (I < 1 or P < 200):
+        contradiction = True
+    if status in ["IDLE", "OFF"] and (V > 150 or L > 500):
+        contradiction = True
+    s_s = 1 if contradiction else 0
+
+    # rule-based score
+    sev_rule = 100 * np.clip(
+        0.25*s_p + 0.25*s_l + 0.2*s_c + 0.15*s_v + 0.1*s_t + 0.05*s_s,
+        0, 1
+    )
+
+    # if model probability given, do hybrid
+    if p_attack is not None:
+        sev = 100*p_attack + 20*s_t + 15*s_p
+        sev = np.clip(sev, 0, 100)
+        return float(sev)
+
+    return float(sev_rule)
+
+
 def preprocess_record(record_tuple):
     """
     Input tuple order (RAW event):
