@@ -39,7 +39,7 @@ class ClassificationResponse(BaseModel):
     loc_x: float = Field(..., description="X coordinate")
     loc_y: float = Field(..., description="Y coordinate")
     provider: str = Field(..., description="Provider name")
-    severity: Optional[float] = Field(None, description="Severity score (0-100) for attacked nodes, None for safe nodes")
+    severity: float = Field(0.0, description="Severity score (0-100). 0.0 for safe nodes, computed value for attacked nodes")
 
 
 class ChargerDataBatchRequest(BaseModel):
@@ -91,8 +91,8 @@ async def classify_charger(data: ChargerDataRequest):
         # Get provider from input or use default
         provider = data.provider if data.provider is not None else "Unknown"
         
-        # Compute severity score for attacked nodes only
-        severity = None
+        # Compute severity score: 0.0 for safe nodes, computed value for attacked nodes
+        severity = 0.0
         if is_attacked:
             # Build record dict for severity computation
             record_dict = {
@@ -188,8 +188,8 @@ async def classify_chargers_batch(data: ChargerDataBatchRequest):
                 # Get provider from input or use default
                 provider = charger_data.provider if charger_data.provider is not None else "Unknown"
                 
-                # Compute severity score for attacked nodes only
-                severity = None
+                # Compute severity score: 0.0 for safe nodes, computed value for attacked nodes
+                severity = 0.0
                 if is_attacked:
                     # Build record dict for severity computation
                     record_dict = {
