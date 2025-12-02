@@ -134,11 +134,16 @@ class AttackClusterDetector:
         labels = clusterer.fit_predict(features)
         combined["new_cluster_id"] = labels
 
-        # Find safe nodes that got assigned to actual attack clusters (not noise)
-        attacked_cluster_ids = set(attacked_copy[attacked_copy["cluster_id"] != -1]["cluster_id"].unique())
+        # Find ALL clusters that contain ANY attacked nodes (including original noise points)
+        # This ensures safe nodes clustering with originally-noisy attacked nodes are also marked as at-risk
+        attacked_node_new_clusters = set(combined[combined["Is_attacked"] == True]["new_cluster_id"].unique())
+        # Exclude noise clusters (-1) from the new clustering
+        attacked_node_new_clusters.discard(-1)
+        
+        # Find safe nodes that are in clusters containing attacked nodes
         at_risk = combined[
             (combined["Is_attacked"] == False) & 
-            (combined["new_cluster_id"].isin(attacked_cluster_ids)) &
+            (combined["new_cluster_id"].isin(attacked_node_new_clusters)) &
             (combined["new_cluster_id"] != -1)  # Exclude noise clusters
         ]
 
